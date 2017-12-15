@@ -26,4 +26,3 @@ def integration_test():
 if __name__ == '__main__':
     integration_test()
     print 'Passed all asserts'
-
