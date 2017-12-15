@@ -16,11 +16,12 @@ class Patient(object):
 
 
 class Datapoint(object):
-    """Class to represent a patient, a dicom image, and the associated icontour"""
-    def __init__(self, patient, dicom, icontour):
+    """Class to represent a patient, a dicom image, and the associated contours"""
+    def __init__(self, patient, dicom, imask, omask):
         self.patient = patient
         self.dicom = dicom
-        self.icontour = icontour
+        self.imask = imask
+        self.omask = omask
 
 
 def get_patients(link_filepath):
@@ -37,7 +38,7 @@ def get_patients(link_filepath):
 
 
 def parse_dir(prefix, suffix):
-    """Glob with a given prefix and suffix and create dict middle part as the key
+    """Glob with a given prefix and suffix and create a dictionary with the middle part as the key.
 
     :param prefix: prefix string
     :param suffix: suffix string
@@ -77,47 +78,69 @@ def get_icontour_paths(patient):
     return icontour_paths_dict
 
 
-def intersect(dict1, dict2):
-    """Get common keys from two dictionaries
-
-    :param dict1: python dict
-    :param dict2: python dict
-    :return: set of keys common to both dicts
+def get_ocontour_paths(patient):
+    """Run parse_dir for ocontours
+    :param patient: Patient object
+    :return: paths to ocountour files for that patient
     """
-    keys1 = dict1.keys()
-    keys2 = dict2.keys()
-    common_keys = set(keys1) & set(keys2)
+
+    # Not sure what IM-0001 stands for. Can this change in the future?
+    prefix = './final_data/contourfiles/{}/o-contours/IM-0001-'.format(patient.original_id)
+    suffix = '-ocontour-manual.txt'
+    ocontour_paths_dict = parse_dir(prefix, suffix)
+    return ocontour_paths_dict
+
+
+def intersect(dicts):
+    """Get common keys from a list of dictionaries
+
+    :param dicts: List of python dicts
+    :return: set of keys common to all dicts
+    """
+    all_keys = [dictionary.keys() for dictionary in dicts]
+    intersect_lambda = lambda keys1, keys2: set(keys1) & set(keys2)
+    common_keys = reduce(intersect_lambda, all_keys)
     return common_keys
 
 
-def read_data(dicom_path, icontour_path):
-    """Read the dicom images and icountours from disk
+def read_data(dicom_path, icontour_path, ocontour_path):
+    """Read the dicom images and countours from disk
 
     :param dicom_path: filepath to dicom file
     :param icontour_path: filepath to icountour file
-    :return: dicom image, mask created using icountour file
+    :param ocontour_path: filepath to ocountour file
+    :return: (dicom image,
+              mask created using icountour file,
+              mask created using ocountour file)
     """
     dcm_dict = parsing.parse_dicom_file(dicom_path)
     width, height = dcm_dict['pixel_data'].shape
-    polygon = parsing.parse_contour_file(icontour_path)
-    mask = parsing.poly_to_mask(polygon, width, height)
-    return (dcm_dict['pixel_data'], mask)
+
+    ipolygon = parsing.parse_contour_file(icontour_path)
+    imask = parsing.poly_to_mask(ipolygon, width, height)
+
+    opolygon = parsing.parse_contour_file(ocontour_path)
+    omask = parsing.poly_to_mask(opolygon, width, height)
+
+    return (dcm_dict['pixel_data'], imask, omask)
 
 
-def get_common_data(common_keys, dicom_paths_dict, icontour_paths_dict):
+def get_common_data(common_keys, dicom_paths_dict, icontour_paths_dict, ocontour_paths_dict):
     """Read all data corresponding to one patient
 
     :param common_keys: set of keys
     :param dicom_paths_dict: dictionary mapping from keys to dicom image filepaths
     :param icontour_paths_dict: dictionary mapping from keys to icontour filepaths
-    :return: a list of tuples of (image, target)
+    :param ocontour_paths_dict: dictionary mapping from keys to ocontour filepaths
+    :return: a list of (image, imask, omask) tuples
     """
 
     all_data = []
     for key in common_keys:
         dicom_path = dicom_paths_dict[key]
         icontour_path = icontour_paths_dict[key]
-        data = read_data(dicom_path, icontour_path)
+        ocontour_path = ocontour_paths_dict[key]
+        data = read_data(dicom_path, icontour_path, ocontour_path)
         all_data.append(data)
     return all_data
 
@@ -130,7 +153,8 @@ def get_datapoints(patient):
     """
     dicom_paths_dict = get_dicom_paths(patient)
     icontour_paths_dict = get_icontour_paths(patient)
-    common_keys = intersect(dicom_paths_dict, icontour_paths_dict)
-    common_data = get_common_data(common_keys, dicom_paths_dict, icontour_paths_dict)
-    datapoints = [Datapoint(patient, dicom, icontour) for dicom, icontour in common_data]
+    ocontour_paths_dict = get_ocontour_paths(patient)
+    common_keys = intersect([dicom_paths_dict, icontour_paths_dict, ocontour_paths_dict])
+    common_data = get_common_data(common_keys, dicom_paths_dict, icontour_paths_dict, ocontour_paths_dict)
+    datapoints = [Datapoint(patient, dicom, imask, omask) for (dicom, imask, omask) in common_data]
     return datapoints
